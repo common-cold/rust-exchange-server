@@ -25,4 +25,35 @@ impl UserBalance {
 
         Ok(balance_map)
     }
+
+    pub fn credit_locked_quote_qty(&mut self, amount: &BigDecimal) -> anyhow::Result<()> {
+        self.locked_quote_qty += amount;
+        Ok(())
+    }
+
+    pub fn credit_locked_base_qty(&mut self, amount: &BigDecimal) -> anyhow::Result<()> {
+        self.locked_base_qty += amount;
+        Ok(())
+    }
+
+    pub fn lock_free_quote_qty(&mut self, amount: &BigDecimal) -> anyhow::Result<()> {
+        if self.free_quote_qty < *amount {
+            return Err(anyhow::anyhow!("Insufficient free quote qty to lock"));
+        }
+
+        self.locked_quote_qty += amount;
+        self.free_quote_qty -= amount;
+        Ok(())
+    }
+
+    pub fn lock_free_base_qty(&mut self, amount: &BigDecimal) -> anyhow::Result<()> {
+        if self.free_base_qty < *amount {
+            return Err(anyhow::anyhow!("Insufficient free base qty to lock"));
+        }
+
+        self.locked_base_qty += amount;
+        self.free_base_qty -= amount;
+        Ok(())
+    }
+
 }

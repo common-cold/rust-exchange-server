@@ -49,6 +49,7 @@ impl Orderbook {
                         None => {
                             let mut order_list = Vec::<Order>::new();
                             order_list.push(order.clone());
+                            bids.insert(order.price.clone(), order_list);
                         }
                         Some(order_list) => {
                             let index = order_list.partition_point(
@@ -63,6 +64,7 @@ impl Orderbook {
                         None => {
                             let mut order_list = Vec::<Order>::new();
                             order_list.push(order.clone());
+                            asks.insert(order.price.clone(), order_list);
                         }
                         Some(order_list) => {
                             let index = order_list.partition_point(
