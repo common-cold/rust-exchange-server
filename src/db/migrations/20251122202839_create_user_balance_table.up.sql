@@ -13,5 +13,6 @@ CREATE TABLE user_balance (
     locked_base_qty   NUMERIC(38,18) NOT NULL DEFAULT 0,
     locked_quote_qty  NUMERIC(38,18) NOT NULL DEFAULT 0,
 
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

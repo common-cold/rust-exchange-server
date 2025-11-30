@@ -1,5 +1,5 @@
 use actix_web::{HttpResponse, web, get};
-use crate::{AppData, service::create_user};
+use crate::{AppData, db::create_user};
 
 pub mod types;
 pub use types::*;

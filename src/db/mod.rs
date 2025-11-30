@@ -4,6 +4,14 @@ use dotenv::dotenv;
 use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
 
 pub mod schema;
+pub mod user;
+pub use user::*;
+pub mod balance;
+pub use balance::*;
+pub mod order;
+pub use order::*;
+pub mod trade;
+pub use trade::*;
 
 #[allow(non_snake_case)]
 pub async fn init_db() -> anyhow::Result<Pool<Postgres>> {
