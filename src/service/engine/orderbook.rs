@@ -89,7 +89,7 @@ impl Orderbook {
                         }
                         Some(order_list) => {
                             let index = order_list.partition_point(
-                                |o| o.created_at >= order.created_at
+                                |o| o.created_at <= order.created_at
                             );
                             order_list.insert(index, order.clone());
                         }
@@ -132,7 +132,7 @@ impl Orderbook {
                     }
                     Some(order_list) => {
                         let index = order_list.partition_point(
-                            |o| o.created_at >= order.created_at
+                            |o| o.created_at <= order.created_at
                         );
                         order_list.insert(index, order.clone());
                     }

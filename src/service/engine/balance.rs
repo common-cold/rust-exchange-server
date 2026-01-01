@@ -5,7 +5,7 @@ use bigdecimal::BigDecimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::service::{CreateOrderArgs, Order, Side};
+use crate::service::{CreateOrderArgs, Side};
 
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -23,7 +23,7 @@ impl UserBalance {
         let mut balance_map: HashMap<Uuid, UserBalance> = HashMap::new();
         
         for balance in balances.iter() {
-            balance_map.insert(balance.id, balance.clone());
+            balance_map.insert(balance.user_id, balance.clone());
         }
 
         Ok(balance_map)
@@ -64,17 +64,17 @@ impl UserBalance {
             Side::Bid => {
                 let free_quote_qty = self.free_quote_qty.clone();
                 let quote_qty_to_lock = free_quote_qty.clone().min(args.quote_qty.clone());   
-                let deposit_amount = &args.quote_qty - quote_qty_to_lock;
+                let deposit_amount = &args.quote_qty - &quote_qty_to_lock;
                 self.credit_locked_quote_qty(&deposit_amount)?;
-                self.lock_free_quote_qty(&free_quote_qty)?;
+                self.lock_free_quote_qty(&quote_qty_to_lock)?;
                 Ok(deposit_amount)
             }
             Side::Ask => {
                 let free_base_qty = self.free_base_qty.clone();
                 let base_qty_to_lock = free_base_qty.clone().min(args.base_qty.clone());   
-                let deposit_amount = &args.base_qty - base_qty_to_lock;
+                let deposit_amount = &args.base_qty - &base_qty_to_lock;
                 self.credit_locked_base_qty(&deposit_amount)?;
-                self.lock_free_base_qty(&free_base_qty)?;  
+                self.lock_free_base_qty(&base_qty_to_lock)?;  
                 Ok(deposit_amount)                    
             }
         }

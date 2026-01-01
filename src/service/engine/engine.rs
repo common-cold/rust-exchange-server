@@ -5,7 +5,7 @@ use sqlx::{Pool, Postgres};
 use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 
-use crate::{db::{create_order, get_all_user_balance, get_open_orders, order}, service::{BalanceEvent, InsertTradeArgs, Order, OrderEvent, OrderType, Orderbook, Side, Status, TradeEvent, UserBalance, orderbook}};
+use crate::{db::{create_order, get_all_user_balance, get_open_orders}, service::{BalanceEvent, InsertTradeArgs, Order, OrderEvent, OrderType, Orderbook, Side, Status, TradeEvent, UserBalance, orderbook}};
 
 pub struct Engine {
     orderbook: Orderbook,
@@ -59,11 +59,7 @@ impl Engine {
                 }
             }
         });
-
-
-        //construct in memory orderbook, user balances
-
-        //start loop 
+        
     }
 
     async fn init_engine(&mut self) -> anyhow::Result<()> {
@@ -73,7 +69,7 @@ impl Engine {
         //load db user balances
         let balances = get_all_user_balance(&self.pool).await?;
 
-        //construct in memory orderbook, user balances
+        //construct in memory orderbook and user balances
         self.orderbook = Orderbook::init_orderbook(orders)?;
         
         self.balances = UserBalance::init_user_balances(balances)?;
@@ -88,7 +84,7 @@ impl Engine {
             return;
         }
 
-        let deposit_amount = {
+        {
             let user_balance = self.balances.get_mut(&args.user_id).unwrap();
             
             //lock funds
@@ -104,9 +100,23 @@ impl Engine {
         //create user's order in db first
         let mut user_order = create_order(&self.pool, &args).await.unwrap();
 
-        for (price, orders) in maker_book.iter_mut() {
+        //for side = ask => maker_book = self.bids, so iterate in reverse direction for that
+        let maker_book_iter: Box<dyn Iterator<Item = (&BigDecimal, &mut Vec<Order>)>> = match args.side {
+            Side::Bid => Box::new(maker_book.iter_mut()),
+            Side::Ask => Box::new(maker_book.iter_mut().rev())
+        };
+
+
+        for (price, orders) in maker_book_iter {
             if quote_qty_remaining.eq(&BigDecimal::from(0)) {
                 break;
+            }
+
+            if args.side == Side::Bid {
+                let user_balance = self.balances.get(&args.user_id).unwrap();
+                if user_balance.locked_quote_qty < *price {
+                    break;
+                }  
             }
 
             let crossed = match args.side {
@@ -122,34 +132,50 @@ impl Engine {
                 break;
             }
 
-            for (index, order) in orders.iter_mut().enumerate() {
-                if quote_qty_remaining.eq(&BigDecimal::from(0)) {
-                    break;
-                }
+            for (_index, order) in orders.iter_mut().enumerate() {
                 
                 let qty_left = &order.quantity - &order.filled_quantity;
 
-                let trade_qty = qty_left.clone().min(quote_qty_remaining.clone());
+                let mut trade_qty = qty_left.clone().min(quote_qty_remaining.clone());
+                
+                if quote_qty_remaining.eq(&BigDecimal::from(0)) {
+                    break;
+                }
+
+                if args.side == Side::Bid {
+                    let user_balance = self.balances.get(&args.user_id).unwrap();
+
+                    if user_balance.locked_quote_qty < order.price {
+                        break;
+                    }
+
+                    let quote_qty_to_pay = &order.price * &trade_qty; 
+                    if quote_qty_to_pay > user_balance.locked_quote_qty {
+                        trade_qty = &user_balance.locked_quote_qty / &order.price;
+                    }
+                    trade_qty = trade_qty.with_scale_round(0, bigdecimal::RoundingMode::Floor);
+                }
+                
 
                 quote_qty_remaining -= &trade_qty;
                 order.filled_quantity += &trade_qty;
                 user_order.filled_quantity += &trade_qty;   
 
-                //update maker balance and emit balance event
+                //update maker balance and emit balance event for maker
                 {
                     let maker_balance = self.balances.get_mut(&order.user_id).unwrap();
                     maker_balance.update_balance(order.side, &order.price, &trade_qty).unwrap();
                     self.balance_tx.send(BalanceEvent::UpdateBalance(maker_balance.clone())).await.unwrap();
                 }
 
-                //update users balance
+                //update user's balance
                 {
                     let user_balance = self.balances.get_mut(&args.user_id).unwrap();
                     user_balance.update_balance(args.side, &order.price, &trade_qty).unwrap();
                 }  
 
             
-                /////emit events
+                /////emit events for maker
                 //ws
 
                 //trade event
@@ -173,7 +199,7 @@ impl Engine {
 
             }
 
-            //remove all orders which are completely filled
+            //remove all in-memory orders which are completely filled
             orders.retain(|order| order.filled_quantity < order.quantity);
         }
 
@@ -184,7 +210,7 @@ impl Engine {
             user_order.status = Status::Close;
         }
     
-        ////emit event
+        ////emit event for user
         //ws
 
         //balance event
@@ -203,7 +229,7 @@ impl Engine {
             return;
         }
 
-        let deposit_amount = {
+        {
             let user_balance = self.balances.get_mut(&args.user_id).unwrap();
             
             //lock funds
@@ -214,37 +240,45 @@ impl Engine {
         //determine maker_book and taker_book
         let (maker_book, taker_book) = self.orderbook.determine_maker_taker_book(args.side);
 
+        //for side = Bid this will be 0 by default
         let mut quote_qty_remaining = args.base_qty.clone();
 
         //create user's order in db first
         let mut user_order = create_order(&self.pool, &args).await.unwrap();
 
-        for (price, orders) in maker_book.iter_mut() {
-            if quote_qty_remaining.eq(&BigDecimal::from(0)) {
-                break;
-            }
-
-            {
-                let user_balance = self.balances.get(&args.user_id).unwrap();
-                if user_balance.locked_quote_qty < *price {
-                    break;
-                }
-            }        
-
-
-            for (_index, order) in orders.iter_mut().enumerate() {
+        //for side = ask => maker_book = self.bids, so iterate in reverse direction for that
+        let maker_book_iter: Box<dyn Iterator<Item = (&BigDecimal, &mut Vec<Order>)>> = match args.side {
+            Side::Bid => Box::new(maker_book.iter_mut()),
+            Side::Ask => Box::new(maker_book.iter_mut().rev())
+        };
+        
+        for (price, orders) in maker_book_iter {
+            
+            if args.side == Side::Ask {
                 if quote_qty_remaining.eq(&BigDecimal::from(0)) {
                     break;
                 }
+            } else {
+                let user_balance = self.balances.get(&args.user_id).unwrap();
+                if user_balance.locked_quote_qty < *price {
+                    break;
+                }  
+            }
+        
 
-                let qty_left = &order.quantity - &order.filled_quantity;
+            for (_index, order) in orders.iter_mut().enumerate() {
+                
+                let mut trade_qty = &order.quantity - &order.filled_quantity;
 
-                let mut trade_qty = qty_left.clone().min(quote_qty_remaining.clone());
 
-                {
+                if args.side == Side::Ask {
+                    if quote_qty_remaining.eq(&BigDecimal::from(0)) {
+                        break;
+                    }
+                } else {
                     let user_balance = self.balances.get(&args.user_id).unwrap();
 
-                    if user_balance.locked_quote_qty < *price {
+                    if user_balance.locked_quote_qty < order.price {
                         break;
                     }
 
@@ -252,31 +286,36 @@ impl Engine {
                     if quote_qty_to_pay > user_balance.locked_quote_qty {
                         trade_qty = &user_balance.locked_quote_qty / &order.price;
                     }
+                    trade_qty = trade_qty.with_scale_round(0, bigdecimal::RoundingMode::Floor);
                 }
 
-                quote_qty_remaining -= &trade_qty;
+
+                if args.side == Side::Ask {
+                    quote_qty_remaining -= &trade_qty;
+                }
                 order.filled_quantity += &trade_qty;
                 user_order.filled_quantity += &trade_qty;   
 
-                //update maker balance and emit balance event
+                //update maker balance and emit balance event for maker
                 {
                     let maker_balance = self.balances.get_mut(&order.user_id).unwrap();
                     maker_balance.update_balance(order.side, &order.price, &trade_qty).unwrap();
                     self.balance_tx.send(BalanceEvent::UpdateBalance(maker_balance.clone())).await.unwrap();
                 }
 
-                //update users balance
+                //update user's balance
                 {
                     let user_balance = self.balances.get_mut(&args.user_id).unwrap();
                     user_balance.update_balance(args.side, &order.price, &trade_qty).unwrap();
                 }  
 
             
-                /////emit events
+                /////emit events for maker
                 //ws
 
                 //trade event
                 let (buy_order_id, sell_order_id) = Engine::determine_order_ids_for_trade_event(args.side, user_order.id, order.id).unwrap();
+                
                 self.trade_tx.send(TradeEvent::InsertTrade(InsertTradeArgs {
                     buy_order_id: buy_order_id,
                     sell_order_id: sell_order_id,
@@ -295,7 +334,7 @@ impl Engine {
 
             }
 
-            //remove all orders which are completely filled
+            //remove all in-memory orders which are completely filled
             orders.retain(|order| order.filled_quantity < order.quantity);
         }
 
