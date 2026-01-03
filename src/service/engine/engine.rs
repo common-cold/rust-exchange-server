@@ -5,7 +5,7 @@ use sqlx::{Pool, Postgres};
 use tokio::sync::mpsc::{Receiver, Sender};
 use uuid::Uuid;
 
-use crate::{db::{create_order, get_all_user_balance, get_open_orders}, service::{BalanceEvent, InsertTradeArgs, Order, OrderEvent, OrderType, Orderbook, Side, Status, TradeEvent, UserBalance, orderbook}};
+use crate::{db::{create_order, create_user_balance, get_all_user_balance, get_open_orders}, service::{BalanceEvent, InsertTradeArgs, Order, OrderEvent, OrderType, Orderbook, Side, Status, TradeEvent, UserBalance, orderbook}};
 
 pub struct Engine {
     orderbook: Orderbook,
@@ -78,10 +78,9 @@ impl Engine {
     }
 
     pub async fn execute_limit_order(&mut self, args: CreateOrderArgs) {
-        //user existence check
         if self.balances.get(&args.user_id).is_none() {
-            eprintln!("User does not exist");
-            return;
+            let user_balance = create_user_balance(&self.pool, args.user_id).await.unwrap();
+            self.balances.insert(args.user_id, user_balance);
         }
 
         {
@@ -223,10 +222,9 @@ impl Engine {
 
 
     pub async fn execute_market_order(&mut self, args: CreateOrderArgs) {
-        //user existence check
         if self.balances.get(&args.user_id).is_none() {
-            eprintln!("User does not exist");
-            return;
+            let user_balance = create_user_balance(&self.pool, args.user_id).await.unwrap();
+            self.balances.insert(args.user_id, user_balance);
         }
 
         {

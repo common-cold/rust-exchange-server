@@ -33,17 +33,17 @@ async fn main() -> anyhow::Result<()> {
     
     tokio::spawn(async move {
         let mut balance_worker = BalanceWorker::default(balance_db, balance_rx);
-        balance_worker.run();
+        balance_worker.run().await;
     });
 
     tokio::spawn(async move {
         let mut trade_worker = TradeWorker::default(trade_db, trade_rx);
-        trade_worker.run();
+        trade_worker.run().await;
     });
 
     tokio::spawn(async move {
         let mut order_worker = OrderWorker::default(order_db, order_rx);
-        order_worker.run();
+        order_worker.run().await;
     });
 
     std::thread::spawn(move || {
