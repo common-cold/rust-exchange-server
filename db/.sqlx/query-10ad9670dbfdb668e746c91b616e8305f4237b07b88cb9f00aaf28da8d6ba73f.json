@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO trades (\n            buy_order_id,\n            sell_order_id,\n            price,\n            quantity\n        )\n        VALUES (\n            $1,\n            $2,\n            $3,\n            $4\n        )\n        RETURNING\n            id,\n            buy_order_id,\n            sell_order_id,\n            price,\n            quantity,\n            created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "buy_order_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "sell_order_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "price",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "quantity",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Numeric",
+        "Numeric"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "10ad9670dbfdb668e746c91b616e8305f4237b07b88cb9f00aaf28da8d6ba73f"
+}

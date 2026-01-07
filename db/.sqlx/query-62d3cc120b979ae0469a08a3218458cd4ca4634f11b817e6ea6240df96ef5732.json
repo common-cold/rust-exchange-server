@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT \n            id,\n            user_id,\n            free_base_qty,\n            free_quote_qty,\n            locked_base_qty,\n            locked_quote_qty,\n            created_at,\n            updated_at\n        FROM user_balance\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "free_base_qty",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "free_quote_qty",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "locked_base_qty",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "locked_quote_qty",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "62d3cc120b979ae0469a08a3218458cd4ca4634f11b817e6ea6240df96ef5732"
+}

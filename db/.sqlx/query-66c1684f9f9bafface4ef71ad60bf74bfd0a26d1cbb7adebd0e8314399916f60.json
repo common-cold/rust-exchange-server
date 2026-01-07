@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE user_balance\n        SET\n            free_base_qty = $1,\n            free_quote_qty = $2,\n            locked_base_qty = $3,\n            locked_quote_qty = $4,\n            updated_at     = NOW()\n        WHERE user_id = $5\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "66c1684f9f9bafface4ef71ad60bf74bfd0a26d1cbb7adebd0e8314399916f60"
+}

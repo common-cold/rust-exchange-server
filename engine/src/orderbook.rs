@@ -1,0 +1,160 @@
+use std::collections::BTreeMap;
+
+use async_trait::async_trait;
+use bigdecimal::BigDecimal;
+use common::{Order, Orderbook, Side};
+use uuid::Uuid;
+
+
+
+#[async_trait]
+pub trait OrderBookTrait {
+    fn default() -> Self;
+    fn init_orderbook(orders: Vec<Order>) -> anyhow::Result<Orderbook>;
+    fn add_order(&mut self, order: Order) -> anyhow::Result<()>;
+    fn remove_order(&mut self, order_id: Uuid, side: Side, price: &BigDecimal) -> anyhow::Result<()>;
+    fn determine_maker_taker_book(&mut self, side: Side) -> (&mut BTreeMap<BigDecimal, Vec<Order>>, &mut BTreeMap<BigDecimal, Vec<Order>>);
+}
+
+
+
+impl OrderBookTrait for Orderbook {
+    fn default() -> Self {
+        Self { 
+            bids: BTreeMap::new(), 
+            asks: BTreeMap::new()
+        }
+    }
+
+    fn init_orderbook(orders: Vec<Order>) -> anyhow::Result<Orderbook> {
+        let mut bids: BTreeMap<BigDecimal, Vec<Order>> = BTreeMap::new();
+        let mut asks: BTreeMap<BigDecimal, Vec<Order>> = BTreeMap::new();
+
+        for order in orders.iter() {
+            match order.side {
+                Side::Bid => {
+                    match bids.get_mut(&order.price) {
+                        None => {
+                            let mut order_list = Vec::<Order>::new();
+                            order_list.push(order.clone());
+                            bids.insert(order.price.clone(), order_list);
+                        }
+                        Some(order_list) => {
+                            let index = order_list.partition_point(
+                                |o| o.created_at <= order.created_at
+                            );
+                            order_list.insert(index, order.clone());
+                        }
+                    }
+                }    
+                Side::Ask => {
+                    match asks.get_mut(&order.price) {
+                        None => {
+                            let mut order_list = Vec::<Order>::new();
+                            order_list.push(order.clone());
+                            asks.insert(order.price.clone(), order_list);
+                        }
+                        Some(order_list) => {
+                            let index = order_list.partition_point(
+                                |o| o.created_at <= order.created_at
+                            );
+                            order_list.insert(index, order.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        let orderbook = Orderbook {
+            bids: bids,
+            asks: asks
+        };
+
+        Ok(orderbook)
+    }
+
+    fn add_order(&mut self, order: Order) -> anyhow::Result<()> {
+        match order.side {
+            Side::Bid => {
+                match self.bids.get_mut(&order.price) {
+                    None => {
+                        let mut order_list = Vec::<Order>::new();
+                        order_list.push(order.clone());
+                        self.bids.insert(order.price.clone(), order_list);
+                    }
+                    Some(order_list) => {
+                        let index = order_list.partition_point(
+                            |o| o.created_at <= order.created_at
+                        );
+                        order_list.insert(index, order.clone());
+                    }
+                }
+            }    
+            Side::Ask => {
+                match self.asks.get_mut(&order.price) {
+                    None => {
+                        let mut order_list = Vec::<Order>::new();
+                        order_list.push(order.clone());
+                        self.asks.insert(order.price.clone(), order_list);
+                    }
+                    Some(order_list) => {
+                        let index = order_list.partition_point(
+                            |o| o.created_at <= order.created_at
+                        );
+                        order_list.insert(index, order.clone());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_order(&mut self, order_id: Uuid, side: Side, price: &BigDecimal) -> anyhow::Result<()> {
+        let book = match side {
+            Side::Bid => {
+                &mut self.bids
+            }
+
+            Side::Ask => {
+                &mut self.asks
+            }
+        };
+
+        match book.get_mut(price) {
+            None => {
+                return Err(anyhow::anyhow!("Orders at price: {:?} does not exist", price));
+            }
+
+            Some(order_list) => {
+                match order_list.binary_search_by(
+                    |order| order.price.cmp(price)
+                ) {
+                    //index must be 0
+                    Ok(index) => {
+                        let order = &order_list[index];
+                        if order.id == order_id {
+                            order_list.remove(index);
+                        } else {
+                            return Err(anyhow::anyhow!("Order does not exist"));
+                        }
+                    }
+                    Err(_) => {
+                        return Err(anyhow::anyhow!("Order does not exist"));
+                    }
+                }   
+            }
+        }
+        Ok(())
+    }
+
+    fn determine_maker_taker_book(&mut self, side: Side) -> (&mut BTreeMap<BigDecimal, Vec<Order>>, &mut BTreeMap<BigDecimal, Vec<Order>>) {
+        match side {
+            Side::Bid => {
+                (&mut self.asks, &mut self.bids)
+            }
+            Side::Ask => {
+                (&mut self.bids, &mut self.asks)
+            }
+        }    
+    }
+}
