@@ -15,7 +15,7 @@ pub struct CreateOrderArgs {
     pub order_type: OrderType,
     pub side: Side,
     pub user_id: Uuid,
-    pub limit_price: BigDecimal,
+    pub limit_price: Option<BigDecimal>,
     pub base_qty: BigDecimal,
     pub quote_qty: BigDecimal
 }
@@ -26,14 +26,4 @@ pub struct InsertTradeArgs {
     pub sell_order_id: Uuid,
     pub price: BigDecimal,
     pub quantity: BigDecimal
-}
-
-#[derive(Debug)]
-pub enum EngineIx {
-    CreateLimitOrder(CreateOrderArgs),
-    CreateMarketOrder(CreateOrderArgs),
-    CancelOrder {
-        key: String
-    },
-    Shutdown
 }

@@ -36,7 +36,7 @@ pub struct Order {
     pub id: Uuid,
     pub user_id: Uuid,
     pub order_type: OrderType,
-    pub price: BigDecimal,
+    pub price: Option<BigDecimal>,
     pub quantity: BigDecimal,
     pub filled_quantity: BigDecimal,
     pub side: Side,
@@ -45,7 +45,7 @@ pub struct Order {
     pub updated_at: i64
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Orderbook {
     pub bids: BTreeMap<BigDecimal, Vec<Order>>,
     pub asks: BTreeMap<BigDecimal, Vec<Order>>,
@@ -61,7 +61,7 @@ pub struct UserBalance {
     pub locked_quote_qty: BigDecimal,
 }
 
-#[derive(sqlx::FromRow, Serialize, Deserialize, Clone)]
+#[derive(sqlx::FromRow, Serialize, Deserialize, Clone, Debug)]
 pub struct Trade {
     pub id: Uuid,
     pub buy_order_id: Uuid,

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use anyhow::Ok;
 use async_trait::async_trait;
@@ -85,10 +85,10 @@ impl UserBalanceTrait for UserBalance {
         match side {
             Side::Bid => {
                 self.free_base_qty += trade_qty;
-                self.locked_quote_qty -= &(trade_qty * price);
+                self.locked_quote_qty -= &(trade_qty * price) / BigDecimal::from_str("1000000000").unwrap();
             }
             Side::Ask => {
-                self.free_quote_qty += &(trade_qty * price);
+                self.free_quote_qty += &(trade_qty * price) / BigDecimal::from_str("1000000000").unwrap();
                 self.locked_base_qty -= trade_qty;
             }
         };

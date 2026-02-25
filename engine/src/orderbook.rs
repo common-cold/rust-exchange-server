@@ -33,11 +33,11 @@ impl OrderBookTrait for Orderbook {
         for order in orders.iter() {
             match order.side {
                 Side::Bid => {
-                    match bids.get_mut(&order.price) {
+                    match bids.get_mut(order.price.as_ref().unwrap()) {
                         None => {
                             let mut order_list = Vec::<Order>::new();
                             order_list.push(order.clone());
-                            bids.insert(order.price.clone(), order_list);
+                            bids.insert(order.price.as_ref().unwrap().clone(), order_list);
                         }
                         Some(order_list) => {
                             let index = order_list.partition_point(
@@ -48,11 +48,11 @@ impl OrderBookTrait for Orderbook {
                     }
                 }    
                 Side::Ask => {
-                    match asks.get_mut(&order.price) {
+                    match asks.get_mut(order.price.as_ref().unwrap()) {
                         None => {
                             let mut order_list = Vec::<Order>::new();
                             order_list.push(order.clone());
-                            asks.insert(order.price.clone(), order_list);
+                            asks.insert(order.price.as_ref().unwrap().clone(), order_list);
                         }
                         Some(order_list) => {
                             let index = order_list.partition_point(
@@ -76,11 +76,11 @@ impl OrderBookTrait for Orderbook {
     fn add_order(&mut self, order: Order) -> anyhow::Result<()> {
         match order.side {
             Side::Bid => {
-                match self.bids.get_mut(&order.price) {
+                match self.bids.get_mut(order.price.as_ref().unwrap()) {
                     None => {
                         let mut order_list = Vec::<Order>::new();
                         order_list.push(order.clone());
-                        self.bids.insert(order.price.clone(), order_list);
+                        self.bids.insert(order.price.as_ref().unwrap().clone(), order_list);
                     }
                     Some(order_list) => {
                         let index = order_list.partition_point(
@@ -91,11 +91,11 @@ impl OrderBookTrait for Orderbook {
                 }
             }    
             Side::Ask => {
-                match self.asks.get_mut(&order.price) {
+                match self.asks.get_mut(order.price.as_ref().unwrap()) {
                     None => {
                         let mut order_list = Vec::<Order>::new();
                         order_list.push(order.clone());
-                        self.asks.insert(order.price.clone(), order_list);
+                        self.asks.insert(order.price.as_ref().unwrap().clone(), order_list);
                     }
                     Some(order_list) => {
                         let index = order_list.partition_point(
@@ -127,7 +127,7 @@ impl OrderBookTrait for Orderbook {
 
             Some(order_list) => {
                 match order_list.binary_search_by(
-                    |order| order.price.cmp(price)
+                    |order| order.price.as_ref().unwrap().cmp(price)
                 ) {
                     //index must be 0
                     Ok(index) => {

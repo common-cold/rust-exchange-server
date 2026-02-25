@@ -11,7 +11,7 @@ pub async fn create_user_in_db(db: &Pool<Postgres>, args: SignUp) -> anyhow::Res
 pub async fn create_order_in_engine(engine_tx: Sender<EngineIx>, args: CreateOrderArgs) -> anyhow::Result<()> {
     let result = match args.order_type {
         OrderType::Limit => engine_tx.send(EngineIx::CreateLimitOrder(args)).await,
-        OrderType::Market => engine_tx.send(EngineIx::CreateLimitOrder(args)).await  
+        OrderType::Market => engine_tx.send(EngineIx::CreateMarketOrder(args)).await  
     };
 
     result.map_err(|e| anyhow!("{:?}", e))

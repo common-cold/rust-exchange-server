@@ -2,6 +2,7 @@ use anyhow::Ok;
 use bigdecimal::BigDecimal;
 use common::{CreateOrderArgs, DbOrder, Order, OrderType, Orderbook, Side, Status};
 use sqlx::{Pool, Postgres};
+use uuid::Uuid;
 
 
 pub async fn get_open_orders(pool: &Pool<Postgres>) -> anyhow::Result<Vec<Order>> {
@@ -85,7 +86,7 @@ pub async fn create_order(pool: &Pool<Postgres>, create_order_args: &CreateOrder
 }
 
 pub async fn update_order(pool: &Pool<Postgres>, updated_order: Order) -> anyhow::Result<()> {
-    let db_order = sqlx::query_as!(
+    let _db_order = sqlx::query_as!(
         DbOrder,
         r#"
         UPDATE orders
@@ -103,4 +104,31 @@ pub async fn update_order(pool: &Pool<Postgres>, updated_order: Order) -> anyhow
     .await?;
 
     Ok(())
+}
+
+pub async fn get_order_by_user_id(pool: &Pool<Postgres>, id: Uuid) -> anyhow::Result<Order> {
+    let db_order = sqlx::query_as!(
+        DbOrder,
+        r#"
+        SELECT 
+            id,
+            user_id,
+            order_type AS "order_type: OrderType",
+            price,
+            quantity,
+            filled_quantity,
+            side AS "side: Side",
+            status AS "status: Status",
+            created_at, 
+            updated_at
+        FROM orders
+        WHERE user_id = $1
+        "#,
+        id
+    ).fetch_one(pool)
+    .await?;
+
+    let order: Order = Orderbook::convert_db_order(&db_order)?;
+
+    Ok(order)
 }

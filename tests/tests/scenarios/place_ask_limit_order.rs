@@ -1,24 +1,27 @@
 use std::str::FromStr;
+
 use bigdecimal::BigDecimal;
 use common::{CreateOrderArgs, OrderType, Side, Status};
 
 use crate::TestHarness;
 
+
+
 #[tokio::test]
-pub async fn place_bid_limitorder() {
+pub async fn place_ask_limit_order() {
     let harness = TestHarness::start().await;
 
     let email = String::from("user@gmail.com");
     let pass = String::from("password");
     let user = harness.create_user_in_db(&email, &pass).await;
 
-    let limit_price = BigDecimal::from_str("125000000").unwrap();
-    let base_qty = BigDecimal::from_str("5000000000").unwrap();
-    let quote_qty = BigDecimal::from_str("63000000000000000").unwrap();
+    let limit_price = BigDecimal::from_str("120000000").unwrap();
+    let base_qty = BigDecimal::from_str("2000000000").unwrap();
+    let quote_qty = BigDecimal::from_str("0").unwrap();
 
     let args = CreateOrderArgs {
         order_type: OrderType::Limit,
-        side: Side::Bid,
+        side: Side::Ask,
         user_id: user.id,
         limit_price: Some(limit_price) ,
         base_qty: base_qty,
@@ -29,21 +32,7 @@ pub async fn place_bid_limitorder() {
 
     harness.flush().await.unwrap();
 
-    let (orderbook, balances) = harness.get_engine_state().await.unwrap();
-
-    println!("-----------------------------");
-    println!("Orderbook = ");
-    println!("{:#?}", orderbook);
-    
-    println!("-----------------------------");
-    println!("Balances = ");
-    println!("{:#?}", balances);
-
-    println!("-----------------------------");
-    println!("Db Order = ");
     let order = harness.get_db_order_by_user_id(user.id).await;
-
-    println!("{:#?}", order);
 
     assert_eq!(order.filled_quantity, BigDecimal::from_str("0").unwrap());
     assert_eq!(order.quantity, args.base_qty);

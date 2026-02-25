@@ -23,9 +23,13 @@ impl TradeWorker {
                     TradeEvent::InsertTrade(args) => {
                         create_trade(&self.pool, args).await.unwrap();
                     },
-                    TradeEvent::Shutdown => {
+                    TradeEvent::Shutdown(engine_shutdown_ctx) => {
+                        let _ = engine_shutdown_ctx.send(common::AcknowledgementEvent::Shutdown).await;
                         println!("Shutting Down Trade Worker");
                         break;
+                    },
+                    TradeEvent::Flush(engine_flush_ctx) => {
+                        let _ = engine_flush_ctx.send(common::AcknowledgementEvent::Flush).await;
                     }
                 }
             }

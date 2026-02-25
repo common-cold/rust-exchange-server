@@ -19,7 +19,7 @@ pub struct DbOrder {
     pub id: Uuid,
     pub user_id: Uuid,
     pub order_type: OrderType,
-    pub price: BigDecimal,
+    pub price: Option<BigDecimal>,
     pub quantity: BigDecimal,
     pub filled_quantity: BigDecimal,
     pub side: Side,

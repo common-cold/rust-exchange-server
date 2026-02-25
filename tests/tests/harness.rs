@@ -1,69 +1,126 @@
 use backend::create_order_in_engine;
-use common::{CreateOrderArgs, DbUser, EngineIx};
-use db::{create_user};
-use sqlx::{PgConnection, Pool, Postgres, pool::PoolConnection, postgres::PgPoolOptions};
-use tokio::sync::mpsc::{self, Sender};
+use common::{AcknowledgementEvent, CreateOrderArgs, DbUser, EngineIx, Order, Orderbook, Trade, UserBalance};
+use db::{create_user, get_all_trades, get_order_by_user_id, get_trades_by_buy_and_sell_order_id, get_user_balance};
+use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
+use testcontainers::{ContainerAsync, runners::AsyncRunner};
+use testcontainers_modules::postgres::Postgres as Pg;
+use tokio::{sync::mpsc::{self, Sender}, time::sleep};
 use runtime::AppRuntime;
 use uuid::Uuid;
-use std::env;
-use dotenv::dotenv;
+use std::{collections::HashMap, time::Duration};
 
 mod scenarios;
-
 
 pub struct TestHarness {
    pub engine_tx: Sender<EngineIx>,
    pub db: Pool<Postgres>,
-   schema: String
+   pub testcontainer_node: ContainerAsync<Pg>
 }
 
 impl TestHarness {
     pub async fn start() -> Self {
-        dotenv().ok();
-        let DATABASE_URL = env::var("DATABASE_URL").unwrap();
-
-        let schema = format!("test_{}", Uuid::new_v4().simple());
-        // bootstrap pool (no search_path)
-        let bootstrap_db = PgPoolOptions::new()
-            .max_connections(1)
-            .connect(&DATABASE_URL)
-            .await.unwrap();
-
-        let mut conn = bootstrap_db.acquire().await.unwrap();
-
-        // create schema
-        TestHarness::create_schema(&mut *conn, &schema).await.unwrap();
-        let db = TestHarness::init_db_test(schema.clone()).await.unwrap();
-        
-        // let schema = TestHarness::create_schema(&mut *conn, &schema).await.unwrap();
-        
-        // TestHarness::set_search_path(&mut *conn, &schema).await.unwrap();
-        
-        sqlx::migrate!("../db/migrations")
-        .run(&db)
-        .await
-        .unwrap();
-
+        let (db, node) = TestHarness::init_testcontainer().await.unwrap();
         let app_runtime = AppRuntime::run(db.clone());
         Self {
           engine_tx: app_runtime.engine_tx,
           db: db,
-          schema: schema
+          testcontainer_node: node
         }
     }
 
     pub async fn shutdown(&self) -> anyhow::Result<()> {
+        let (harness_tx, mut harness_rx) = mpsc::channel::<AcknowledgementEvent>(1);
+
         //stop engine and workers
-        self.engine_tx.send(EngineIx::Shutdown).await.unwrap();
-        
-        //drop db
-        TestHarness::drop_schema(&self.db, &self.schema).await.unwrap();
+        self.engine_tx.send(EngineIx::Shutdown(harness_tx)).await.unwrap();
+
+        //wait for ack
+        loop {
+            if let Some(cmd) = harness_rx.recv().await {
+                match cmd {
+                    AcknowledgementEvent::Shutdown => {
+                        break;
+                    },
+                    _ => {}
+                }
+            }
+        }
 
         Ok(())
     }
 
+    pub async fn flush(&self) -> anyhow::Result<()> {
+        let (harness_tx, mut harness_rx) = mpsc::channel::<AcknowledgementEvent>(1);
 
-    pub async fn create_user(&self, email: &String, pass: &String) -> DbUser {
+        //send Flush command
+        self.engine_tx.send(EngineIx::Flush(harness_tx)).await.unwrap();
+
+        //wait for ack
+        loop {
+            if let Some(cmd) = harness_rx.recv().await {
+                match cmd {
+                    AcknowledgementEvent::Flush => {
+                        break;
+                    },
+                    _ => {}
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    pub async fn get_engine_state(&self) -> anyhow::Result<(Orderbook, HashMap<Uuid, UserBalance>)> {
+        let (harness_tx, mut harness_rx) = mpsc::channel::<AcknowledgementEvent>(1);
+
+        //send State command
+        self.engine_tx.send(EngineIx::State(harness_tx)).await.unwrap();
+
+        //wait for ack
+        loop {
+            if let Some(cmd) = harness_rx.recv().await {
+                match cmd {
+                    AcknowledgementEvent::State((orderbook, balances)) => {
+                        return Ok((orderbook, balances));
+                    },
+                    _ => {}
+                }
+            }
+        }
+    }
+ 
+
+    pub async fn init_testcontainer() -> anyhow::Result<(Pool<Postgres>, ContainerAsync<Pg>)> {
+        let postgres_image = Pg::default();
+        let node = postgres_image.start().await?;
+
+        let host = node.get_host().await?;
+        let port = node.get_host_port_ipv4(5432).await?;
+        let connection_string = &format!(
+            "postgres://postgres:postgres@{}:{}/postgres?sslmode=disable",
+            host,
+            port
+        );
+
+        let pool = loop {
+            match PgPoolOptions::new()
+                .max_connections(10)
+                .connect(&connection_string).await {
+                Ok(pool) => break pool,
+                Err(_) => sleep(Duration::from_millis(500)).await,
+            }
+        };
+        
+        sqlx::migrate!("../db/test-migrations")
+        .run(&pool)
+        .await
+        .unwrap();
+
+        Ok((pool, node))
+    }
+
+    
+    pub async fn create_user_in_db(&self, email: &String, pass: &String) -> DbUser {
         create_user(&self.db, &email, &pass).await.unwrap()
     }
 
@@ -71,56 +128,33 @@ impl TestHarness {
         create_order_in_engine(self.engine_tx.clone(), args).await
     }
 
-    pub async fn init_db_test(schema: String) -> anyhow::Result<Pool<Postgres>> {
-        dotenv().ok();
-        let DATABASE_URL = env::var("DATABASE_URL")?;
-
-        let db = PgPoolOptions::new()
-        .max_connections(10)
-        .after_connect(move |conn, _| {
-            let schema = schema.clone();
-            Box::pin(async move {
-                sqlx::query(&format!("SET search_path TO {}, public", schema))
-                    .execute(conn)
-                    .await?;
-                Ok(())
-            })
-        })
-        .connect(&DATABASE_URL)
-        .await?;
-
-        Ok(db)
+    pub async fn get_db_order_by_user_id(&self, id: Uuid) -> Order {
+        get_order_by_user_id(&self.db, id).await.unwrap()
     }
 
-    pub async fn create_schema(pool: &mut PgConnection, schema: &String) -> anyhow::Result<()> {
-        
-        sqlx::query(
-            &format!(r#"CREATE SCHEMA "{}""#, schema)
-        )
-        .execute(pool)
-        .await?;
-        
-        Ok(())
+    pub async fn get_db_trades(&self) -> Vec<Trade> {
+        get_all_trades(&self.db).await.unwrap()
     }
 
-    pub async fn set_search_path(pool: &mut PgConnection, schema: &str) -> anyhow::Result<()> {
-        sqlx::query(
-            &format!(r#"SET search_path TO "{}", public"#, schema)
-        )
-        .execute(pool)
-        .await?;
-
-        Ok(())
+    pub async fn get_db_trades_by_buy_sell_order_id(&self, buy_order_id: Uuid, sell_order_id: Uuid) -> Vec<Trade> {
+        get_trades_by_buy_and_sell_order_id(&self.db, buy_order_id, sell_order_id).await.unwrap()
     }
 
-    pub async fn drop_schema(pool: &Pool<Postgres>, schema: &str) -> anyhow::Result<()> {
-        sqlx::query(
-            &format!(r#"DROP SCHEMA "{}" CASCADE"#, schema)
-        )
-        .execute(pool)
-        .await?;    
-
-        Ok(())
+    pub async fn get_balance_from_db(&self, user_id: Uuid) -> UserBalance {
+        get_user_balance(&self.db, user_id).await.unwrap()
     }
+    
+    pub async fn pretty_print_orderbook() {
+        {
+            
+        }
+    }   
 }
 
+
+impl Drop for TestHarness {
+    fn drop(&mut self) {
+        let (harness_tx, _) = mpsc::channel::<AcknowledgementEvent>(1);
+        let _ = self.engine_tx.try_send(EngineIx::Shutdown(harness_tx));
+    }
+}

@@ -38,6 +38,38 @@ pub async fn get_all_user_balance(pool: &Pool<Postgres>) -> anyhow::Result<Vec<U
     Ok(balances)
 }
 
+pub async fn get_user_balance(pool: &Pool<Postgres>, user_id: Uuid) -> anyhow::Result<UserBalance> {
+    let db_balance: DbUserBalance = sqlx::query_as!(
+        DbUserBalance,
+        r#"
+        SELECT 
+            id,
+            user_id,
+            free_base_qty,
+            free_quote_qty,
+            locked_base_qty,
+            locked_quote_qty,
+            created_at,
+            updated_at
+        FROM user_balance
+        WHERE user_id = $1
+        "#,
+        user_id
+    ).fetch_one(pool)
+    .await?;
+
+    let balance = UserBalance {
+        id: db_balance.id,
+        user_id: db_balance.user_id,
+        free_base_qty: db_balance.free_base_qty.clone(),
+        free_quote_qty: db_balance.free_quote_qty.clone(),
+        locked_base_qty: db_balance.locked_base_qty.clone(),
+        locked_quote_qty: db_balance.locked_quote_qty.clone()
+    };
+
+    Ok(balance)
+}
+
 
 pub async fn create_user_balance(pool: &Pool<Postgres>, user_id: Uuid) -> anyhow::Result<UserBalance> {
     let db_balance = sqlx::query_as!(
@@ -85,7 +117,7 @@ pub async fn create_user_balance(pool: &Pool<Postgres>, user_id: Uuid) -> anyhow
 }
 
 pub async fn update_user_balance(pool: &Pool<Postgres>, updated_balance: UserBalance) -> anyhow::Result<()> {
-    let db_balance = sqlx::query_as!(
+    let _db_balance = sqlx::query_as!(
         DbUserBalance,
         r#"
         UPDATE user_balance

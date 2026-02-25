@@ -24,9 +24,13 @@ impl BalanceWorker {
                     BalanceEvent::UpdateBalance(args) => {
                         update_user_balance(&self.pool, args).await.unwrap()
                     },
-                    BalanceEvent::Shutdown => {
+                    BalanceEvent::Shutdown(engine_shutdown_tx) => {
+                        let _ = engine_shutdown_tx.send(common::AcknowledgementEvent::Shutdown).await;
                         println!("Shutting Down Balance Worker");
                         break;
+                    },
+                    BalanceEvent::Flush(engine_flush_tx) => {
+                        let _ = engine_flush_tx.send(common::AcknowledgementEvent::Flush).await;
                     }
                 }
             }

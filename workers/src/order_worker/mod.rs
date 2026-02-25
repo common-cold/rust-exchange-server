@@ -24,9 +24,13 @@ impl OrderWorker {
                     OrderEvent::UpdateOrder(args) => {
                         update_order(&self.pool, args).await.unwrap()
                     },
-                    OrderEvent::Shutdown => {
+                    OrderEvent::Shutdown(engine_shutdown_ctx) => {
+                        let _ = engine_shutdown_ctx.send(common::AcknowledgementEvent::Shutdown).await;
                         println!("Shutting Down Order Worker");
                         break;
+                    },
+                    OrderEvent::Flush(engine_flush_ctx) => {
+                        let _ = engine_flush_ctx.send(common::AcknowledgementEvent::Flush).await;
                     }
                 }
             }

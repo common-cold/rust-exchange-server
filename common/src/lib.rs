@@ -4,8 +4,8 @@ pub use db_schema::*;
 pub mod state;
 pub use state::*;
 
-pub mod worker_event;
-pub use worker_event::*;
+pub mod channel_events;
+pub use channel_events::*;
 
 pub mod dto;
 pub use dto::*;

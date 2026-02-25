@@ -1,2 +1,6 @@
 pub mod test_signup;
 pub mod place_bid_limit_order;
+pub mod place_ask_limit_order;
+pub mod place_ask_then_bid_limit_order_and_match;
+pub mod place_bid_then_ask_limit_order_and_match;
+pub mod place_limit_ask_then_market_bid_order;
