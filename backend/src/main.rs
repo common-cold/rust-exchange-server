@@ -5,7 +5,7 @@ use runtime::AppRuntime;
 use sqlx::{Pool, Postgres};
 use tokio::sync::mpsc::{Sender};
 
-use crate::controller::{create_order, signup};
+use crate::controller::{cancel_user_order, create_order, debug_engine, onramp_balance, signup};
 
 mod controller;
 mod service;
@@ -34,6 +34,9 @@ async fn main() -> anyhow::Result<()> {
             .app_data(web::Data::new(app_data.clone()))
             .service(signup)
             .service(create_order)
+            .service(cancel_user_order)
+            .service(onramp_balance)
+            .service(debug_engine)
     })
     .bind(("127.0.0.1", 8080))?
     .run()

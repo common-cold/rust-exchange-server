@@ -71,7 +71,7 @@ pub async fn get_user_balance(pool: &Pool<Postgres>, user_id: Uuid) -> anyhow::R
 }
 
 
-pub async fn create_user_balance(pool: &Pool<Postgres>, user_id: Uuid) -> anyhow::Result<UserBalance> {
+pub async fn create_user_balance(pool: &Pool<Postgres>, user_id: Uuid, initial_free_quote_qty: BigDecimal) -> anyhow::Result<UserBalance> {
     let db_balance = sqlx::query_as!(
         DbUserBalance,
         r#"
@@ -85,7 +85,7 @@ pub async fn create_user_balance(pool: &Pool<Postgres>, user_id: Uuid) -> anyhow
         VALUES (
             $1,
             0,
-            0,
+            $2,
             0,
             0
         )
@@ -99,7 +99,8 @@ pub async fn create_user_balance(pool: &Pool<Postgres>, user_id: Uuid) -> anyhow
             created_at,
             updated_at
         "#,
-        user_id
+        user_id,
+        initial_free_quote_qty
     )
     .fetch_one(pool)
     .await?;
@@ -108,7 +109,7 @@ pub async fn create_user_balance(pool: &Pool<Postgres>, user_id: Uuid) -> anyhow
         id: db_balance.id, 
         user_id, 
         free_base_qty: BigDecimal::from(0), 
-        free_quote_qty: BigDecimal::from(0), 
+        free_quote_qty: db_balance.free_quote_qty, 
         locked_base_qty: BigDecimal::from(0), 
         locked_quote_qty: BigDecimal::from(0) 
     };

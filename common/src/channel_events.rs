@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
-use crate::{CreateOrderArgs, InsertTradeArgs, Order, Orderbook, UserBalance};
+use crate::{CreateOrderArgs, InsertTradeArgs, OnRampArgs, Order, Orderbook, UserBalance};
 
 
 #[derive(Debug)]
@@ -11,11 +11,13 @@ pub enum EngineIx {
     CreateLimitOrder(CreateOrderArgs),
     CreateMarketOrder(CreateOrderArgs),
     CancelOrder {
-        key: String
+        order_id: Uuid
     },
+    OnRamp(OnRampArgs),
     State(Sender<AcknowledgementEvent>),
     Shutdown(Sender<AcknowledgementEvent>),
-    Flush(Sender<AcknowledgementEvent>)
+    Flush(Sender<AcknowledgementEvent>),
+    Debug
 }
 
 

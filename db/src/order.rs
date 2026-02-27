@@ -132,3 +132,33 @@ pub async fn get_order_by_user_id(pool: &Pool<Postgres>, id: Uuid) -> anyhow::Re
 
     Ok(order)
 }
+
+pub async fn get_order_by_order_id(pool: &Pool<Postgres>, order_id: Uuid) -> anyhow::Result<Option<Order>> {
+    let db_order = sqlx::query_as!(
+        DbOrder,
+        r#"
+        SELECT 
+            id,
+            user_id,
+            order_type AS "order_type: OrderType",
+            price,
+            quantity,
+            filled_quantity,
+            side AS "side: Side",
+            status AS "status: Status",
+            created_at, 
+            updated_at
+        FROM orders
+        WHERE id = $1
+        "#,
+        order_id
+    ).fetch_optional(pool)
+    .await?;
+
+    if db_order.is_none() {
+        return Ok(None);
+    }
+    let order: Order = Orderbook::convert_db_order(&db_order.unwrap())?;
+
+    Ok(Some(order))
+}

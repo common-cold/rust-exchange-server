@@ -1,5 +1,6 @@
-use backend::create_order_in_engine;
-use common::{AcknowledgementEvent, CreateOrderArgs, DbUser, EngineIx, Order, Orderbook, Trade, UserBalance};
+use backend::{cancel_order, create_order_in_engine, fetch_conversion_rate, onramp};
+use bigdecimal::BigDecimal;
+use common::{AcknowledgementEvent, CreateOrderArgs, Currency, DbUser, EngineIx, OnRampArgs, Order, Orderbook, Trade, UserBalance};
 use db::{create_user, get_all_trades, get_order_by_user_id, get_trades_by_buy_and_sell_order_id, get_user_balance};
 use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
@@ -7,7 +8,7 @@ use testcontainers_modules::postgres::Postgres as Pg;
 use tokio::{sync::mpsc::{self, Sender}, time::sleep};
 use runtime::AppRuntime;
 use uuid::Uuid;
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, str::FromStr, time::Duration};
 
 mod scenarios;
 
@@ -89,7 +90,6 @@ impl TestHarness {
         }
     }
  
-
     pub async fn init_testcontainer() -> anyhow::Result<(Pool<Postgres>, ContainerAsync<Pg>)> {
         let postgres_image = Pg::default();
         let node = postgres_image.start().await?;
@@ -120,6 +120,7 @@ impl TestHarness {
     }
 
     
+
     pub async fn create_user_in_db(&self, email: &String, pass: &String) -> DbUser {
         create_user(&self.db, &email, &pass).await.unwrap()
     }
@@ -143,12 +144,26 @@ impl TestHarness {
     pub async fn get_balance_from_db(&self, user_id: Uuid) -> UserBalance {
         get_user_balance(&self.db, user_id).await.unwrap()
     }
-    
-    pub async fn pretty_print_orderbook() {
-        {
-            
-        }
-    }   
+
+    pub async fn cancel_order(&self, order_id: Uuid) {
+        cancel_order(self.engine_tx.clone(), order_id).await.unwrap()
+    }
+
+    pub async fn onramp_balance(&self, args: OnRampArgs) {
+        onramp(self.engine_tx.clone(), args).await.unwrap();
+    }
+
+    pub async fn get_conversion_rate(&self, currency: Currency) -> f64 {
+        fetch_conversion_rate(currency).await.unwrap()
+    }
+
+    pub fn calculate_usdc_base_units(&self, amount: BigDecimal, conversion_rate: BigDecimal) -> BigDecimal {
+        let mut usdc_amount_in_base_units = &amount / conversion_rate;
+        usdc_amount_in_base_units = usdc_amount_in_base_units.with_scale_round(6, bigdecimal::RoundingMode::Down);
+        usdc_amount_in_base_units = usdc_amount_in_base_units * BigDecimal::from_str("1000000").unwrap();
+        return usdc_amount_in_base_units;
+    }
+       
 }
 
 

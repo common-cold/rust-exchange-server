@@ -1,7 +1,7 @@
 use std::{collections::HashMap, str::FromStr};
 use bigdecimal::BigDecimal;
-use common::{AcknowledgementEvent, BalanceEvent, CreateOrderArgs, EngineIx, InsertTradeArgs, Order, OrderEvent, Orderbook, Side, Status, TradeEvent, UserBalance};
-use db::{create_order, create_user_balance, get_all_user_balance, get_open_orders};
+use common::{AcknowledgementEvent, BalanceEvent, CreateOrderArgs, EngineIx, InsertTradeArgs, OnRampArgs, Order, OrderEvent, Orderbook, Side, Status, TradeEvent, UserBalance};
+use db::{create_order, create_user_balance, get_all_user_balance, get_open_orders, get_order_by_order_id};
 use sqlx::{Pool, Postgres};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use uuid::Uuid;
@@ -52,12 +52,14 @@ impl Engine {
                             self.execute_limit_order(args).await;
                         }
                         EngineIx::CreateMarketOrder (args) => {
-                            println!("came match block");
                             self.execute_market_order(args).await;
                         }
-                        EngineIx::CancelOrder { key } => {
-
+                        EngineIx::CancelOrder { order_id } => {
+                            self.cancel_order(order_id).await;
                         },
+                        EngineIx::OnRamp(args) => {
+                            self.onramp(args).await;
+                        }
                         EngineIx::State(tx) => {
                             let _ = tx.send(AcknowledgementEvent::State((self.orderbook.clone(), self.balances.clone()))).await;
                         },
@@ -107,6 +109,13 @@ impl Engine {
                             };
 
                             let _ = tx.send(AcknowledgementEvent::Flush).await;
+                        },
+                        EngineIx::Debug => {
+                            println!("Orderbook:");
+                            println!("{:#?}", self.orderbook);
+                            println!("Balances:");
+                            println!("{:#?}", self.balances);
+                            println!("-------------------------------------------------");
                         }
                     }
                 }
@@ -132,7 +141,7 @@ impl Engine {
 
     pub async fn execute_limit_order(&mut self, args: CreateOrderArgs) {
         if self.balances.get(&args.user_id).is_none() {
-            let user_balance = create_user_balance(&self.pool, args.user_id).await.unwrap();
+            let user_balance = create_user_balance(&self.pool, args.user_id, BigDecimal::from(0)).await.unwrap();
             self.balances.insert(args.user_id, user_balance);
         }
 
@@ -157,7 +166,6 @@ impl Engine {
             Side::Bid => Box::new(maker_book.iter_mut()),
             Side::Ask => Box::new(maker_book.iter_mut().rev())
         };
-
 
         for (price, orders) in maker_book_iter {
             if base_qty_remaining.eq(&BigDecimal::from(0)) {
@@ -253,9 +261,6 @@ impl Engine {
 
             //remove all in-memory orders which are completely filled
             orders.retain(|order| order.filled_quantity < order.quantity);
-            if orders.len() == 0 {
-
-            }
         }
 
         //if quote_qty_remaining > 0 add user order in taker book
@@ -266,7 +271,6 @@ impl Engine {
         }
     
         ////emit event for user
-        //ws
 
         //balance event
         let user_balance = self.balances.get_mut(&args.user_id).unwrap();
@@ -276,11 +280,9 @@ impl Engine {
         self.order_tx.send(OrderEvent::UpdateOrder(user_order.clone())).await.unwrap();
     }
 
-
     pub async fn execute_market_order(&mut self, args: CreateOrderArgs) {
-        println!("came here");
         if self.balances.get(&args.user_id).is_none() {
-            let user_balance = create_user_balance(&self.pool, args.user_id).await.unwrap();
+            let user_balance = create_user_balance(&self.pool, args.user_id, BigDecimal::from(0)).await.unwrap();
             self.balances.insert(args.user_id, user_balance);
         }
 
@@ -386,13 +388,11 @@ impl Engine {
                 //order event
                 self.order_tx.send(OrderEvent::UpdateOrder(order.clone())).await.unwrap();
 
-                println!("Inner loop bottom");
 
             }
 
             //remove all in-memory orders which are completely filled
             orders.retain(|order| order.filled_quantity < order.quantity);
-            println!("Outer loop bottom");
         }
 
         //close this user order
@@ -409,6 +409,82 @@ impl Engine {
         self.order_tx.send(OrderEvent::UpdateOrder(user_order.clone())).await.unwrap();
     }
 
+    pub async fn cancel_order(&mut self, order_id: Uuid) {
+        let order_option = get_order_by_order_id(&self.pool, order_id).await.unwrap();
+        if order_option.is_none() {
+            return;
+        }
+        let mut order = order_option.unwrap();
+
+        if order.status != Status::Open {
+            return;
+        }
+
+        //unlock balance
+        let user_balance_option = self.balances.get_mut(&order.user_id);
+        if user_balance_option.is_none() {
+            return;
+        }
+        let user_balance = user_balance_option.unwrap();
+        if order.side == Side::Bid {
+            let amount = (&order.quantity - &order.filled_quantity) * order.price.as_ref().unwrap();
+            user_balance.free_quote_qty += &amount;
+            user_balance.locked_quote_qty -= &amount;
+        } else {
+            let amount = &order.quantity - &order.filled_quantity;
+            user_balance.free_base_qty += &amount;
+            user_balance.locked_base_qty -= &amount;
+        }
+
+        //update balance in db
+        self.balance_tx.send(BalanceEvent::UpdateBalance(user_balance.clone())).await.unwrap();
+
+        //remove order from in memory orderbook
+        if order.side == Side::Bid {
+            let bids_option = self.orderbook.bids.get_mut(order.price.as_ref().unwrap());
+            if bids_option.is_some() {
+                let bids = bids_option.unwrap();
+                bids.retain(|o| o.id != order.id);
+                if bids.len() == 0 {
+                    self.orderbook.bids.remove(order.price.as_ref().unwrap());
+                }
+            }
+        } else {
+            let asks_option = self.orderbook.asks.get_mut(order.price.as_ref().unwrap());
+            if asks_option.is_some() {
+                let asks = asks_option.unwrap();
+                asks.retain(|o| o.id != order.id);
+                if asks.len() == 0 {
+                    self.orderbook.asks.remove(order.price.as_ref().unwrap());
+                }
+            }
+        }
+
+        //update order in db
+        order.status = Status::Cancelled;
+        self.order_tx.send(OrderEvent::UpdateOrder(order.clone())).await.unwrap();
+    }
+
+    pub async fn onramp(&mut self, args: OnRampArgs) {
+        if args.usdc_conversion_rate.is_none() {
+            return;
+        }
+
+        let mut usdc_amount_in_base_units = &args.amount / args.usdc_conversion_rate.as_ref().unwrap();
+            usdc_amount_in_base_units = usdc_amount_in_base_units.with_scale_round(6, bigdecimal::RoundingMode::Down);
+            usdc_amount_in_base_units = usdc_amount_in_base_units * BigDecimal::from_str("1000000").unwrap();
+        
+        if self.balances.get(&args.user_id).is_none() {
+            let user_balance = create_user_balance(&self.pool, args.user_id, usdc_amount_in_base_units).await.unwrap();
+            self.balances.insert(args.user_id, user_balance);
+            return;
+        }
+
+        let user_balance = self.balances.get_mut(&args.user_id).unwrap();
+        user_balance.free_quote_qty += usdc_amount_in_base_units;
+
+        self.balance_tx.send(BalanceEvent::UpdateBalance(user_balance.clone())).await.unwrap();
+    }
 
     pub fn determine_order_ids_for_trade_event(side: Side, user_order_id: Uuid, 
             matching_order_id: Uuid) -> anyhow::Result<(Uuid, Uuid)> {

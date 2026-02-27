@@ -1,8 +1,17 @@
+use std::collections::HashMap;
+
 use bigdecimal::BigDecimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{OrderType, Side};
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub enum Currency {
+    INR,
+    EUR,
+    USD
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct SignUp {
@@ -26,4 +35,18 @@ pub struct InsertTradeArgs {
     pub sell_order_id: Uuid,
     pub price: BigDecimal,
     pub quantity: BigDecimal
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OnRampArgs {
+    pub user_id: Uuid,
+    pub currency: Currency,
+    pub amount: BigDecimal,
+    pub usdc_conversion_rate: Option<BigDecimal>
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExchangeRateApiDto {
+    pub date: String,
+    pub usdc: HashMap<String, f64>
 }

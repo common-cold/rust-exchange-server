@@ -8,9 +8,8 @@ use crate::TestHarness;
 
 
 #[tokio::test]
-pub async fn place_ask_then_bid_limit_order_and_match() {
+pub async fn place_ask_then_bid_then_cancel_ask() {
     let harness = TestHarness::start().await;
-    
 
     //user1-ask
     let email1_ask = String::from("user1_ask@gmail.com");
@@ -70,7 +69,7 @@ pub async fn place_ask_then_bid_limit_order_and_match() {
 
 
     let order1_ask = harness.get_db_order_by_user_id(user1_ask.id).await;
-    let order2_ask = harness.get_db_order_by_user_id(user2_ask.id).await;
+    let mut order2_ask = harness.get_db_order_by_user_id(user2_ask.id).await;
     let order1_bid = harness.get_db_order_by_user_id(user1_bid.id).await;
 
 
@@ -99,7 +98,7 @@ pub async fn place_ask_then_bid_limit_order_and_match() {
 
     //balance checks
     let user1_ask_balance = harness.get_balance_from_db(user1_ask.id).await;
-    let user2_ask_balance = harness.get_balance_from_db(user2_ask.id).await;
+    let mut user2_ask_balance = harness.get_balance_from_db(user2_ask.id).await;
     let user1_bid_balance = harness.get_balance_from_db(user1_bid.id).await;
 
     assert_eq!(user1_ask_balance.user_id, user1_ask.id);
@@ -108,10 +107,13 @@ pub async fn place_ask_then_bid_limit_order_and_match() {
     assert_eq!(user1_ask_balance.locked_base_qty, BigDecimal::from_str("0").unwrap());
     assert_eq!(user1_ask_balance.locked_quote_qty, BigDecimal::from_str("0").unwrap());
 
+    let free_base_qty = BigDecimal::from_str("0").unwrap();
+    let locked_base_qty = BigDecimal::from_str("1000000000").unwrap();
+
     assert_eq!(user2_ask_balance.user_id, user2_ask.id);
-    assert_eq!(user2_ask_balance.free_base_qty, BigDecimal::from_str("0").unwrap());
+    assert_eq!(user2_ask_balance.free_base_qty, free_base_qty);
     assert_eq!(user2_ask_balance.free_quote_qty, BigDecimal::from_str("360000000").unwrap());
-    assert_eq!(user2_ask_balance.locked_base_qty, BigDecimal::from_str("1000000000").unwrap());
+    assert_eq!(user2_ask_balance.locked_base_qty, locked_base_qty);
     assert_eq!(user2_ask_balance.locked_quote_qty, BigDecimal::from_str("0").unwrap());
 
     assert_eq!(user1_bid_balance.user_id, user1_bid.id);
@@ -144,7 +146,7 @@ pub async fn place_ask_then_bid_limit_order_and_match() {
     
     ////in memory orderbook check
     //ask
-    let (price, ask_list) = in_memory_orderbook.asks.get_key_value(args2_ask.limit_price.as_ref().unwrap()).unwrap();
+    let (_price, ask_list) = in_memory_orderbook.asks.get_key_value(args2_ask.limit_price.as_ref().unwrap()).unwrap();
     assert_eq!(ask_list.len(), 1);
     let ask = &ask_list[0];
     assert_eq!(ask.filled_quantity, BigDecimal::from_str("3000000000").unwrap());
@@ -162,7 +164,7 @@ pub async fn place_ask_then_bid_limit_order_and_match() {
     ////in memory balance check
     assert_eq!(in_memory_balances.len(), 3);
     let in_memory_user1_ask_balance = in_memory_balances.get(&user1_ask.id).unwrap();
-    let in_memory_user2_ask_balance = in_memory_balances.get(&user2_ask.id).unwrap();
+    let mut in_memory_user2_ask_balance = in_memory_balances.get(&user2_ask.id).unwrap();
     let in_memory_user1_bid_balance = in_memory_balances.get(&user1_bid.id).unwrap();
 
     assert_eq!(in_memory_user1_ask_balance.user_id, user1_ask.id);
@@ -182,6 +184,50 @@ pub async fn place_ask_then_bid_limit_order_and_match() {
     assert_eq!(in_memory_user1_bid_balance.free_quote_qty, BigDecimal::from_str("0").unwrap());
     assert_eq!(in_memory_user1_bid_balance.locked_base_qty, BigDecimal::from_str("0").unwrap());
     assert_eq!(in_memory_user1_bid_balance.locked_quote_qty, BigDecimal::from_str("40000000").unwrap());
+
+    
+    //cancel order
+    harness.cancel_order(order2_ask.id).await;
+    harness.flush().await.unwrap();
+
+    order2_ask = harness.get_db_order_by_user_id(user2_ask.id).await;
+
+
+    //order checks
+    assert_eq!(order2_ask.filled_quantity, BigDecimal::from_str("3000000000").unwrap());
+    assert_eq!(order2_ask.quantity, args2_ask.base_qty);
+    assert_eq!(order2_ask.order_type, args2_ask.order_type);
+    assert_eq!(order2_ask.price.as_ref().unwrap(), args2_ask.limit_price.as_ref().unwrap());
+    assert_eq!(order2_ask.side, args2_ask.side);
+    assert_eq!(order2_ask.status, Status::Cancelled);
+
+
+    //balance checks
+    user2_ask_balance = harness.get_balance_from_db(user2_ask.id).await;
+
+    let base_qty_to_unlock = &order2_ask.quantity - &order2_ask.filled_quantity;
+    let new_free_base_qty = &free_base_qty + &base_qty_to_unlock;
+    let new_locked_base_qty = &locked_base_qty - &base_qty_to_unlock;
+
+    assert_eq!(user2_ask_balance.user_id, user2_ask.id);
+    assert_eq!(user2_ask_balance.free_base_qty, new_free_base_qty);
+    assert_eq!(user2_ask_balance.free_quote_qty, BigDecimal::from_str("360000000").unwrap());
+    assert_eq!(user2_ask_balance.locked_base_qty, new_locked_base_qty);
+    assert_eq!(user2_ask_balance.locked_quote_qty, BigDecimal::from_str("0").unwrap());
+
+
+    ////in memory state check
+    let (_in_memory_orderbook, in_memory_balances) = harness.get_engine_state().await.unwrap();
+
+    //in memory balance check
+    assert_eq!(in_memory_balances.len(), 3);
+    in_memory_user2_ask_balance = in_memory_balances.get(&user2_ask.id).unwrap();
+
+    assert_eq!(in_memory_user2_ask_balance.user_id, user2_ask.id);
+    assert_eq!(in_memory_user2_ask_balance.free_base_qty, new_free_base_qty);
+    assert_eq!(in_memory_user2_ask_balance.free_quote_qty, BigDecimal::from_str("360000000").unwrap());
+    assert_eq!(in_memory_user2_ask_balance.locked_base_qty, new_locked_base_qty);
+    assert_eq!(in_memory_user2_ask_balance.locked_quote_qty, BigDecimal::from_str("0").unwrap());
 
     harness.shutdown().await.unwrap();
 }
