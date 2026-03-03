@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
@@ -39,6 +40,7 @@ pub enum TradeEvent {
     Flush(Sender<AcknowledgementEvent>)
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 pub enum AcknowledgementEvent {
     Shutdown,
     Flush,

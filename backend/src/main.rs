@@ -1,6 +1,8 @@
 use actix_web::{App, HttpServer, web};
 use common::{EngineIx};
 use db::init_db;
+use event_bus::consumer::EventBusConsumer;
+use redis_service::RedisConnection;
 use runtime::AppRuntime;
 use sqlx::{Pool, Postgres};
 use tokio::sync::mpsc::{Sender};
@@ -21,8 +23,13 @@ pub struct AppData {
 async fn main() -> anyhow::Result<()> {
     
     let db = init_db().await?;
+    let redis = RedisConnection::new().await?;
+    let runtime_redis = redis.clone();
     
-    let app_runtime = AppRuntime::run(db.clone());
+    EventBusConsumer::run(db.clone(), redis.clone()).await?;
+    EventBusConsumer::run_dlq_consumers(redis).await;
+    
+    let app_runtime = AppRuntime::run(db.clone(), runtime_redis);
     
     let app_data  = AppData {
         pool: db.clone(),

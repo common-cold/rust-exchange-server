@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 db = {path = "../db"}
 common = {path = "../common"}
+event_bus = {path = "../event_bus"}
+redis-service = {path = "../redis-service"}
 actix-web = "4.12.0"
 anyhow = "1.0.100"
 dotenv = "0.15.0"
@@ -19,3 +21,4 @@ uuid = { version = "1", features = ["serde", "v4"] }
 rust_decimal = "1.39.0"
 bigdecimal = { version = "0.4.9", features = ["serde"] }
 async-trait = "0.1.89"
+redis = "1.0.4"

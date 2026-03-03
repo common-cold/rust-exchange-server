@@ -2,8 +2,11 @@ use backend::{cancel_order, create_order_in_engine, fetch_conversion_rate, onram
 use bigdecimal::BigDecimal;
 use common::{AcknowledgementEvent, CreateOrderArgs, Currency, DbUser, EngineIx, OnRampArgs, Order, Orderbook, Trade, UserBalance};
 use db::{create_user, get_all_trades, get_order_by_user_id, get_trades_by_buy_and_sell_order_id, get_user_balance};
+use event_bus::consumer::EventBusConsumer;
+use redis::{aio::ConnectionManager};
+use redis_service::RedisConnection;
 use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
-use testcontainers::{ContainerAsync, runners::AsyncRunner};
+use testcontainers::{ContainerAsync, GenericImage, runners::AsyncRunner};
 use testcontainers_modules::postgres::Postgres as Pg;
 use tokio::{sync::mpsc::{self, Sender}, time::sleep};
 use runtime::AppRuntime;
@@ -15,17 +18,25 @@ mod scenarios;
 pub struct TestHarness {
    pub engine_tx: Sender<EngineIx>,
    pub db: Pool<Postgres>,
-   pub testcontainer_node: ContainerAsync<Pg>
+   pub postgres_testcontainer: ContainerAsync<Pg>,
+   pub redis_testcontainer: ContainerAsync<GenericImage>
 }
 
 impl TestHarness {
     pub async fn start() -> Self {
-        let (db, node) = TestHarness::init_testcontainer().await.unwrap();
-        let app_runtime = AppRuntime::run(db.clone());
+        let (db, node) = TestHarness::init_postgres_testcontainer().await.unwrap();
+        let (redis, redis_testcontainer) = TestHarness::init_redis_testcontainer().await.unwrap();
+        let runtime_redis = redis.clone();
+        
+        EventBusConsumer::run(db.clone(), redis).await.unwrap();
+        
+        let app_runtime = AppRuntime::run(db.clone(), runtime_redis);
+        
         Self {
           engine_tx: app_runtime.engine_tx,
           db: db,
-          testcontainer_node: node
+          postgres_testcontainer: node,
+          redis_testcontainer: redis_testcontainer
         }
     }
 
@@ -90,7 +101,7 @@ impl TestHarness {
         }
     }
  
-    pub async fn init_testcontainer() -> anyhow::Result<(Pool<Postgres>, ContainerAsync<Pg>)> {
+    pub async fn init_postgres_testcontainer() -> anyhow::Result<(Pool<Postgres>, ContainerAsync<Pg>)> {
         let postgres_image = Pg::default();
         let node = postgres_image.start().await?;
 
@@ -119,6 +130,25 @@ impl TestHarness {
         Ok((pool, node))
     }
 
+    pub async fn init_redis_testcontainer() -> anyhow::Result<(RedisConnection, ContainerAsync<GenericImage>)>{
+        let container = GenericImage::new("redis", "7.2.4")
+            .with_exposed_port(testcontainers::core::ContainerPort::Tcp(6379))
+            .start()
+            .await?;
+        let host = container.get_host().await?;
+        let host_port = container.get_host_port_ipv4(6379).await?;
+
+        let url = format!("redis://{host}:{host_port}");
+        let client = redis::Client::open(url)?;
+        let connection_manager=  ConnectionManager::new(client.clone()).await?;
+
+        let redis_connection = RedisConnection {
+            client: client,
+            connection_manger: connection_manager
+        };
+
+        Ok((redis_connection, container))
+    }
     
 
     pub async fn create_user_in_db(&self, email: &String, pass: &String) -> DbUser {

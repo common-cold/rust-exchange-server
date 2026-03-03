@@ -1,19 +1,24 @@
 use common::OrderEvent;
 use db::update_order;
+use event_bus::get_order_stream_length;
+use redis::aio::ConnectionManager;
+use redis_service::RedisConnection;
 use sqlx::{Pool, Postgres};
 use tokio::sync::mpsc::Receiver;
 
 
 pub struct OrderWorker {
     pool: Pool<Postgres>,
-    balance_rx: Receiver<OrderEvent>
+    balance_rx: Receiver<OrderEvent>,
+    redis_conn: ConnectionManager
 }
 
 impl OrderWorker {
-    pub fn default(pool: Pool<Postgres>, balance_rx: Receiver<OrderEvent>) -> Self {
+    pub fn default(pool: Pool<Postgres>, balance_rx: Receiver<OrderEvent>, redis: RedisConnection) -> Self {
         Self { 
             pool: pool, 
-            balance_rx: balance_rx 
+            balance_rx: balance_rx ,
+            redis_conn: redis.connection_manger
         }
     }
 
@@ -30,6 +35,19 @@ impl OrderWorker {
                         break;
                     },
                     OrderEvent::Flush(engine_flush_ctx) => {
+                        loop {
+                            match get_order_stream_length(&mut self.redis_conn).await {
+                                Ok(size) => {
+                                    if size == 0 {
+                                        break;
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Order worker stream length error: {}", e.to_string());
+                                    continue;
+                                }
+                            }
+                        }
                         let _ = engine_flush_ctx.send(common::AcknowledgementEvent::Flush).await;
                     }
                 }

@@ -7,6 +7,8 @@ edition = "2024"
 db = {path = "../db"}
 common = {path = "../common"}
 runtime = {path = "../runtime"}
+redis-service = {path = "../redis-service"}
+event_bus = {path = "../event_bus"}
 actix-web = "4.12.0"
 anyhow = "1.0.100"
 dotenv = "0.15.0"

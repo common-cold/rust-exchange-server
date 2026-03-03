@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 db = {path = "../db"}
 common = {path = "../common"}
+event_bus = {path = "../event_bus"}
+redis-service = {path = "../redis-service"}
 actix-web = "4.12.0"
 anyhow = "1.0.100"
 dotenv = "0.15.0"

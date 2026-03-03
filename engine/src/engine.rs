@@ -1,9 +1,11 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, time::Duration};
 use bigdecimal::BigDecimal;
 use common::{AcknowledgementEvent, BalanceEvent, CreateOrderArgs, EngineIx, InsertTradeArgs, OnRampArgs, Order, OrderEvent, Orderbook, Side, Status, TradeEvent, UserBalance};
 use db::{create_order, create_user_balance, get_all_user_balance, get_open_orders, get_order_by_order_id};
+use event_bus::producer::EventBusProducer;
+use redis_service::RedisConnection;
 use sqlx::{Pool, Postgres};
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::{sync::mpsc::{self, Receiver, Sender}, time::sleep};
 use uuid::Uuid;
 
 use crate::{OrderBookTrait, UserBalanceTrait};
@@ -16,12 +18,14 @@ pub struct Engine {
     trade_tx: Sender<TradeEvent>,
     order_tx: Sender<OrderEvent>,
     pool: Pool<Postgres>,
-    engine_rx: Receiver<EngineIx>
+    engine_rx: Receiver<EngineIx>,
+    event_producer: EventBusProducer
 }
 
 impl Engine {
     pub fn default(balance_tx: Sender<BalanceEvent>, trade_tx: Sender<TradeEvent>,
-        order_tx: Sender<OrderEvent>, pool: Pool<Postgres>, engine_rx: Receiver<EngineIx>) -> Self {
+        order_tx: Sender<OrderEvent>, pool: Pool<Postgres>, engine_rx: Receiver<EngineIx>, redis_conn: RedisConnection) -> Self {
+        let event_producer = EventBusProducer::new(redis_conn.connection_manger);
         Self { 
             orderbook: Orderbook::default(), 
             balances: HashMap::new(),
@@ -29,7 +33,8 @@ impl Engine {
             trade_tx: trade_tx,
             order_tx: order_tx,
             pool: pool,
-            engine_rx: engine_rx
+            engine_rx: engine_rx,
+            event_producer: event_producer
         }
     }
 
@@ -158,7 +163,7 @@ impl Engine {
 
         let mut base_qty_remaining = args.base_qty.clone();
 
-        //create user's order in db first
+        //create user's order in db first synchronously
         let mut user_order = create_order(&self.pool, &args).await.unwrap();
 
         //for side = ask => maker_book = self.bids, so iterate in reverse direction for that
@@ -226,7 +231,7 @@ impl Engine {
                 {
                     let maker_balance = self.balances.get_mut(&order.user_id).unwrap();
                     maker_balance.update_balance(order.side, &order_price, &trade_qty).unwrap();
-                    self.balance_tx.send(BalanceEvent::UpdateBalance(maker_balance.clone())).await.unwrap();
+                    self.event_producer.publish_balance_event(maker_balance.clone()).await.unwrap();
                 }
 
                 //update user's balance
@@ -237,25 +242,23 @@ impl Engine {
 
             
                 /////emit events for maker
-                //ws
-
                 //trade event
                 let (buy_order_id, sell_order_id) = Engine::determine_order_ids_for_trade_event(args.side, user_order.id, order.id).unwrap();
                 
-                self.trade_tx.send(TradeEvent::InsertTrade(InsertTradeArgs {
+                let inser_trade_args = InsertTradeArgs {
                     buy_order_id: buy_order_id,
                     sell_order_id: sell_order_id,
                     price: order_price.clone(),
                     quantity: trade_qty.clone()
-                }))
-                .await.unwrap();
+                };
+                self.event_producer.publish_trade_event(inser_trade_args).await.unwrap();
 
                 if order.filled_quantity.eq(&order.quantity) {
                     order.status = Status::Close;
                 }
 
                 //order event
-                self.order_tx.send(OrderEvent::UpdateOrder(order.clone())).await.unwrap();
+                self.event_producer.publish_order_event(order.clone()).await.unwrap();
 
             }
 
@@ -271,13 +274,12 @@ impl Engine {
         }
     
         ////emit event for user
-
         //balance event
         let user_balance = self.balances.get_mut(&args.user_id).unwrap();
-        self.balance_tx.send(BalanceEvent::UpdateBalance(user_balance.clone())).await.unwrap();
+        self.event_producer.publish_balance_event(user_balance.clone()).await.unwrap();
         
         //order event
-        self.order_tx.send(OrderEvent::UpdateOrder(user_order.clone())).await.unwrap();
+        self.event_producer.publish_order_event(user_order.clone()).await.unwrap();
     }
 
     pub async fn execute_market_order(&mut self, args: CreateOrderArgs) {
@@ -300,7 +302,7 @@ impl Engine {
 
         let mut base_qty_remaining = args.base_qty.clone();
 
-        //create user's order in db first
+        //create user's order in db first, synchronously
         let mut user_order = create_order(&self.pool, &args).await.unwrap();
 
         //for side = ask => maker_book = self.bids, so iterate in reverse direction for that
@@ -356,7 +358,7 @@ impl Engine {
                 {
                     let maker_balance = self.balances.get_mut(&order.user_id).unwrap();
                     maker_balance.update_balance(order.side, &order_price, &trade_qty).unwrap();
-                    self.balance_tx.send(BalanceEvent::UpdateBalance(maker_balance.clone())).await.unwrap();
+                    self.event_producer.publish_balance_event(maker_balance.clone()).await.unwrap();
                 }
 
                 //update user's balance
@@ -367,18 +369,17 @@ impl Engine {
 
             
                 /////emit events for maker
-                //ws
-
                 //trade event
                 let (buy_order_id, sell_order_id) = Engine::determine_order_ids_for_trade_event(args.side, user_order.id, order.id).unwrap();
                 
-                self.trade_tx.send(TradeEvent::InsertTrade(InsertTradeArgs {
+                let trade_args = InsertTradeArgs {
                     buy_order_id: buy_order_id,
                     sell_order_id: sell_order_id,
                     price: order_price.clone(),
                     quantity: trade_qty.clone()
-                }))
-                .await.unwrap();
+                };
+
+                self.event_producer.publish_trade_event(trade_args).await.unwrap();
 
                 //close maker_order if filled qty == qty
                 if order.filled_quantity.eq(&order.quantity) {
@@ -386,7 +387,7 @@ impl Engine {
                 }
 
                 //order event
-                self.order_tx.send(OrderEvent::UpdateOrder(order.clone())).await.unwrap();
+                self.event_producer.publish_order_event(order.clone()).await.unwrap();
 
 
             }
@@ -399,14 +400,12 @@ impl Engine {
         user_order.status = Status::Close;
         
         ////emit event
-        //ws
-
         //balance event
         let user_balance = self.balances.get_mut(&args.user_id).unwrap();
-        self.balance_tx.send(BalanceEvent::UpdateBalance(user_balance.clone())).await.unwrap();
+        self.event_producer.publish_balance_event(user_balance.clone()).await.unwrap();
         
         //order event
-        self.order_tx.send(OrderEvent::UpdateOrder(user_order.clone())).await.unwrap();
+        self.event_producer.publish_order_event(user_order.clone()).await.unwrap();
     }
 
     pub async fn cancel_order(&mut self, order_id: Uuid) {
@@ -437,7 +436,7 @@ impl Engine {
         }
 
         //update balance in db
-        self.balance_tx.send(BalanceEvent::UpdateBalance(user_balance.clone())).await.unwrap();
+        self.event_producer.publish_balance_event(user_balance.clone()).await.unwrap();
 
         //remove order from in memory orderbook
         if order.side == Side::Bid {
@@ -462,7 +461,7 @@ impl Engine {
 
         //update order in db
         order.status = Status::Cancelled;
-        self.order_tx.send(OrderEvent::UpdateOrder(order.clone())).await.unwrap();
+        self.event_producer.publish_order_event(order.clone()).await.unwrap();
     }
 
     pub async fn onramp(&mut self, args: OnRampArgs) {
@@ -483,7 +482,7 @@ impl Engine {
         let user_balance = self.balances.get_mut(&args.user_id).unwrap();
         user_balance.free_quote_qty += usdc_amount_in_base_units;
 
-        self.balance_tx.send(BalanceEvent::UpdateBalance(user_balance.clone())).await.unwrap();
+        self.event_producer.publish_balance_event(user_balance.clone()).await.unwrap();
     }
 
     pub fn determine_order_ids_for_trade_event(side: Side, user_order_id: Uuid, 

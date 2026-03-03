@@ -29,7 +29,7 @@ pub struct CreateOrderArgs {
     pub quote_qty: BigDecimal
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct InsertTradeArgs {
     pub buy_order_id: Uuid,
     pub sell_order_id: Uuid,
