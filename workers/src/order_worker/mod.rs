@@ -9,22 +9,22 @@ use tokio::sync::mpsc::Receiver;
 
 pub struct OrderWorker {
     pool: Pool<Postgres>,
-    balance_rx: Receiver<OrderEvent>,
+    order_rx: Receiver<OrderEvent>,
     redis_conn: ConnectionManager
 }
 
 impl OrderWorker {
-    pub fn default(pool: Pool<Postgres>, balance_rx: Receiver<OrderEvent>, redis: RedisConnection) -> Self {
+    pub fn default(pool: Pool<Postgres>, order_rx: Receiver<OrderEvent>, redis: RedisConnection) -> Self {
         Self { 
             pool: pool, 
-            balance_rx: balance_rx ,
+            order_rx: order_rx ,
             redis_conn: redis.connection_manger
         }
     }
 
     pub async fn run(&mut self) {
         loop {
-            if let Some(cmd) = self.balance_rx.recv().await {
+            if let Some(cmd) = self.order_rx.recv().await {
                 match cmd {
                     OrderEvent::UpdateOrder(args) => {
                         update_order(&self.pool, args).await.unwrap()

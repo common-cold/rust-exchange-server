@@ -211,7 +211,8 @@ pub async fn place_bid_then_ask_then_cancel_bid() {
     //balance checks
     user1_bid_balance = harness.get_balance_from_db(user1_bid.id).await;
 
-    let quote_qty_to_unlock = (&order1_bid.quantity - &order1_bid.filled_quantity) * order1_bid.price.as_ref().unwrap();
+    let mut quote_qty_to_unlock = (&order1_bid.quantity - &order1_bid.filled_quantity) * order1_bid.price.as_ref().unwrap();
+    quote_qty_to_unlock = quote_qty_to_unlock / BigDecimal::from_str("1000000000").unwrap();
     let new_free_quote_qty = &free_quote_qty + &quote_qty_to_unlock;
     let new_locked_quote_qty = &locked_quote_qty - &quote_qty_to_unlock;
 

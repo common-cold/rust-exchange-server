@@ -1,11 +1,11 @@
-use std::{collections::HashMap, str::FromStr, time::Duration};
+use std::{collections::HashMap, str::FromStr};
 use bigdecimal::BigDecimal;
 use common::{AcknowledgementEvent, BalanceEvent, CreateOrderArgs, EngineIx, InsertTradeArgs, OnRampArgs, Order, OrderEvent, Orderbook, Side, Status, TradeEvent, UserBalance};
 use db::{create_order, create_user_balance, get_all_user_balance, get_open_orders, get_order_by_order_id};
 use event_bus::producer::EventBusProducer;
 use redis_service::RedisConnection;
 use sqlx::{Pool, Postgres};
-use tokio::{sync::mpsc::{self, Receiver, Sender}, time::sleep};
+use tokio::{sync::mpsc::{self, Receiver, Sender}};
 use uuid::Uuid;
 
 use crate::{OrderBookTrait, UserBalanceTrait};
@@ -426,7 +426,8 @@ impl Engine {
         }
         let user_balance = user_balance_option.unwrap();
         if order.side == Side::Bid {
-            let amount = (&order.quantity - &order.filled_quantity) * order.price.as_ref().unwrap();
+            let mut amount = (&order.quantity - &order.filled_quantity) * order.price.as_ref().unwrap();
+            amount = amount / BigDecimal::from_str("1000000000").unwrap();
             user_balance.free_quote_qty += &amount;
             user_balance.locked_quote_qty -= &amount;
         } else {
